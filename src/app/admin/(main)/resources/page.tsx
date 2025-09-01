@@ -37,7 +37,7 @@ interface Resource {
     id: string;
     title: string;
     description: string;
-    type: 'File' | 'Video';
+    type: 'File' | 'Video/Web Link';
     url: string;
     createdAt: Timestamp;
 }
@@ -237,5 +237,3 @@ export default function ResourcesPage() {
     </div>
   );
 }
-
-    

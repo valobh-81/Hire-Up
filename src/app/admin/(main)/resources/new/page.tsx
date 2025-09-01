@@ -12,18 +12,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Link as LinkIcon, File as FileIcon, Users, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { ArrowLeft, Link as LinkIcon, File as FileIcon, Users, Loader2, CheckCircle2, AlertCircle, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db, storage } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { sendBulkNotification, getStudentEmailCount, type EmailStatus } from "@/lib/actions";
 
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().optional(),
-  url: z.string().url("Please enter a valid URL."),
-  type: z.enum(['File', 'Video']),
+  url: z.string().url("Please enter a valid URL.").optional().or(z.literal('')),
+  type: z.enum(['File', 'Video/Web Link']),
 });
 
 
@@ -33,6 +34,7 @@ export default function NewResourcePage() {
   const [isPending, startTransition] = useTransition();
   const [results, setResults] = useState<EmailStatus[]>([]);
   const [studentCount, setStudentCount] = useState(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -44,6 +46,8 @@ export default function NewResourcePage() {
     },
   });
 
+  const resourceType = form.watch("type");
+
   useEffect(() => {
     const fetchCount = async () => {
         const count = await getStudentEmailCount();
@@ -54,30 +58,51 @@ export default function NewResourcePage() {
 
 
   const handleSubmit = async (values: z.infer<typeof formSchema>) => {
-    setResults([]);
-    if (studentCount === 0) {
+    if (values.type === 'File' && !selectedFile) {
         toast({
             variant: "destructive",
-            title: "No Students",
-            description: "There are no students to notify.",
+            title: "File Required",
+            description: "Please select a file to upload.",
         });
         return;
     }
+    if (values.type === 'Video/Web Link' && !values.url) {
+        toast({
+            variant: "destructive",
+            title: "URL Required",
+            description: "Please enter a valid URL for the resource.",
+        });
+        return;
+    }
+
+    setResults([]);
     startTransition(async () => {
         try {
-            // 1. Add the resource to the database
+            let resourceUrl = values.url || "";
+            
+            // 1. If file, upload to storage
+            if (values.type === 'File' && selectedFile) {
+                const storageRef = ref(storage, `resources/${Date.now()}_${selectedFile.name}`);
+                const uploadResult = await uploadBytes(storageRef, selectedFile);
+                resourceUrl = await getDownloadURL(uploadResult.ref);
+            }
+            
+            // 2. Add the resource to the database
             await addDoc(collection(db, "resources"), {
-                ...values,
+                title: values.title,
+                description: values.description,
+                url: resourceUrl,
+                type: values.type,
                 createdAt: serverTimestamp(),
             });
 
-            // 2. Trigger the bulk email server action to notify students
+            // 3. Trigger the bulk email server action to notify students
             const emailSubject = `New Resource Added: ${values.title}`;
             const emailContent = `A new preparation resource has been uploaded.<br/><br/>
                                   <strong>Title:</strong> ${values.title}<br/>
                                   <strong>Description:</strong> ${values.description || 'No description provided.'}<br/>
                                   <strong>Type:</strong> ${values.type}<br/><br/>
-                                  You can access it here: <a href="${values.url}">${values.url}</a>`;
+                                  You can access it here: <a href="${resourceUrl}">${resourceUrl}</a>`;
 
             const data = await sendBulkNotification(emailSubject, emailContent);
             setResults(data);
@@ -140,6 +165,32 @@ export default function NewResourcePage() {
 
                     <FormField
                         control={form.control}
+                        name="type"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Resource Type</FormLabel>
+                                <Select onValueChange={(value) => {
+                                    field.onChange(value);
+                                    form.setValue('url', '');
+                                    setSelectedFile(null);
+                                }} defaultValue={field.value}>
+                                    <FormControl>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select resource type" />
+                                        </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                        <SelectItem value="File"><FileIcon className="mr-2 h-4 w-4 inline-block" />File (PDF, Doc, etc.)</SelectItem>
+                                        <SelectItem value="Video/Web Link"><LinkIcon className="mr-2 h-4 w-4 inline-block" />Video/Web Link</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+
+                    <FormField
+                        control={form.control}
                         name="title"
                         render={({ field }) => (
                             <FormItem>
@@ -164,40 +215,46 @@ export default function NewResourcePage() {
                             </FormItem>
                         )}
                     />
-                    <FormField
-                        control={form.control}
-                        name="url"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Resource URL</FormLabel>
-                                <FormControl>
-                                    <Input type="url" placeholder="https://youtube.com/watch?v=..." {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                    <FormField
-                        control={form.control}
-                        name="type"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Resource Type</FormLabel>
-                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+
+                    {resourceType === "Video/Web Link" && (
+                         <FormField
+                            control={form.control}
+                            name="url"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Resource URL</FormLabel>
                                     <FormControl>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select resource type" />
-                                        </SelectTrigger>
+                                        <Input type="url" placeholder="https://youtube.com/watch?v=..." {...field} />
                                     </FormControl>
-                                    <SelectContent>
-                                        <SelectItem value="File"><FileIcon className="mr-2 h-4 w-4 inline-block" />File (PDF, Doc, etc.)</SelectItem>
-                                        <SelectItem value="Video"><LinkIcon className="mr-2 h-4 w-4 inline-block" />Video/Web Link</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                    )}
+                   
+                   {resourceType === "File" && (
+                        <FormItem>
+                            <FormLabel>Upload File</FormLabel>
+                            <FormControl>
+                                <div className="flex items-center gap-4">
+                                     <label htmlFor="file-upload" className="flex-grow">
+                                        <div className="flex items-center justify-center w-full h-10 px-3 py-2 text-sm border rounded-md cursor-pointer border-input bg-background hover:bg-accent hover:text-accent-foreground">
+                                           <Upload className="w-4 h-4 mr-2"/>
+                                           <span>{selectedFile ? 'Change file' : 'Choose a file'}</span>
+                                        </div>
+                                        <Input 
+                                            id="file-upload" 
+                                            type="file" 
+                                            className="hidden" 
+                                            onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
+                                        />
+                                    </label>
+                                </div>
+                            </FormControl>
+                            {selectedFile && <p className="text-sm text-muted-foreground mt-2">Selected: {selectedFile.name}</p>}
+                            <FormMessage />
+                        </FormItem>
+                   )}
 
                     <div className="flex justify-end">
                         <Button type="submit" disabled={isPending || studentCount === 0}>
