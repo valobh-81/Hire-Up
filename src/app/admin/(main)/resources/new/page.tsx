@@ -18,7 +18,8 @@ import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db, storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { sendBulkNotification, getStudentEmailCount, type EmailStatus } from "@/lib/actions";
+import { getStudentEmailCount } from "@/lib/actions";
+import { sendResourceNotification, type EmailStatus } from "@/ai/flows/send-resource-notification-flow";
 
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
@@ -97,14 +98,13 @@ export default function NewResourcePage() {
             });
 
             // 3. Trigger the bulk email server action to notify students
-            const emailSubject = `New Resource Added: ${values.title}`;
-            const emailContent = `A new preparation resource has been uploaded.<br/><br/>
-                                  <strong>Title:</strong> ${values.title}<br/>
-                                  <strong>Description:</strong> ${values.description || 'No description provided.'}<br/>
-                                  <strong>Type:</strong> ${values.type}<br/><br/>
-                                  You can access it here: <a href="${resourceUrl}">${resourceUrl}</a>`;
+            const data = await sendResourceNotification({
+              title: values.title,
+              description: values.description,
+              url: resourceUrl,
+              type: values.type,
+            });
 
-            const data = await sendBulkNotification(emailSubject, emailContent);
             setResults(data);
             const successes = data.filter(r => r.status === 'success').length;
             const failures = data.filter(r => r.status === 'failed').length;

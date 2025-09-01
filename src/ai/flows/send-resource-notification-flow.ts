@@ -6,4 +6,100 @@
  * - sendResourceNotification - A function that handles the notification sending process.
  * - SendResourceNotificationInput - The input type for the sendResourceNotification function.
  */
-// This file is kept for structure, but the logic is removed to make the app static.
+
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import * as nodemailer from "nodemailer";
+import { z } from "zod";
+
+export type EmailStatus = {
+  email: string;
+  status: "success" | "failed";
+  message: string;
+};
+
+const SendResourceNotificationInputSchema = z.object({
+  title: z.string(),
+  description: z.string().optional(),
+  url: z.string(),
+  type: z.string(),
+});
+
+export type SendResourceNotificationInput = z.infer<typeof SendResourceNotificationInputSchema>;
+
+
+async function sendEmail(
+  to: string,
+  subject: string,
+  htmlContent: string
+): Promise<{ success: boolean; message: string }> {
+  const { GMAIL_EMAIL, GMAIL_APP_PASSWORD } = process.env;
+
+  if (!GMAIL_EMAIL || !GMAIL_APP_PASSWORD) {
+    const errorMessage = "Email service is not configured. Please set GMAIL_EMAIL and GMAIL_APP_PASSWORD environment variables.";
+    console.error(errorMessage);
+    return { success: false, message: errorMessage };
+  }
+
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: GMAIL_EMAIL,
+      pass: GMAIL_APP_PASSWORD,
+    },
+  });
+
+  try {
+    await transporter.sendMail({
+      from: `"Hire Up" <${GMAIL_EMAIL}>`,
+      to,
+      subject,
+      html: htmlContent,
+    });
+    return { success: true, message: "Email sent successfully." };
+  } catch (error: any) {
+    console.error(`Failed to send email to ${to}:`, error);
+    return {
+      success: false,
+      message: `Failed to send email: ${error.message || "Unknown error"}`,
+    };
+  }
+}
+
+export async function sendResourceNotification(input: SendResourceNotificationInput): Promise<EmailStatus[]> {
+
+  let recipients: string[] = [];
+  try {
+    const querySnapshot = await getDocs(collection(db, "student-emails"));
+    recipients = querySnapshot.docs.map(doc => doc.data().email);
+  } catch (error) {
+    console.error("Error fetching recipients:", error);
+    throw new Error("Could not fetch recipients. Please check your Firestore security rules.");
+  }
+  
+  if(recipients.length === 0) {
+    return [];
+  }
+
+  const uniqueEmails = [...new Set(recipients)];
+  const emailSubject = `New Resource Added: ${input.title}`;
+  const htmlContent = `A new preparation resource has been uploaded.<br/><br/>
+                        <strong>Title:</strong> ${input.title}<br/>
+                        <strong>Description:</strong> ${input.description || 'No description provided.'}<br/>
+                        <strong>Type:</strong> ${input.type}<br/><br/>
+                        You can access it here: <a href="${input.url}">${input.url}</a>`;
+
+
+  const results = await Promise.all(
+    uniqueEmails.map(async (email) => {
+      const result = await sendEmail(email, emailSubject, htmlContent);
+      return {
+        email,
+        status: result.success ? "success" : "failed",
+        message: result.message,
+      };
+    })
+  );
+
+  return results;
+}

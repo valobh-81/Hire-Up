@@ -34,9 +34,8 @@ export default function StudentProfilePage() {
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
-            if (user) {
+            if (user && user.email) {
                 setLoading(true);
-                // Fallback to query if direct path fails (e.g. course unknown)
                 let profileFound = false;
                 for (const course of COURSES) {
                     const studentQuery = query(collection(db, `Students-list/Course/${course}`), where("email", "==", user.email), limit(1));
@@ -73,11 +72,10 @@ export default function StudentProfilePage() {
 
             await updateDoc(detailRef, updatedData);
             
-            // Also update the root Students collection for consistency
-            if(profile?.email){
-                 await updateDoc(doc(db, 'Students', profile.email), { fullName });
-            }
-
+            // This collection doesn't exist, removing to prevent errors
+            // if(profile?.email){
+            //      await updateDoc(doc(db, 'Students', profile.email), { fullName });
+            // }
 
             toast({
                 title: "Success!",
