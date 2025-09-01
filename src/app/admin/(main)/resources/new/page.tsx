@@ -18,8 +18,7 @@ import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db, storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getStudentEmailCount } from "@/lib/actions";
-import { sendResourceNotification, type EmailStatus } from "@/ai/flows/send-resource-notification-flow";
+import { getStudentEmailCount, sendResourceNotification, type EmailStatus } from "@/lib/actions";
 
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
