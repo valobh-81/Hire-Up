@@ -57,7 +57,7 @@ export default function NewResourcePage() {
   }, []);
 
 
-  const handleSubmit = async (values: z.infer<typeof formSchema>>) => {
+  const handleSubmit = async (values: z.infer<typeof formSchema>) => {
     if (values.type === 'File' && !selectedFile) {
         toast({
             variant: "destructive",
