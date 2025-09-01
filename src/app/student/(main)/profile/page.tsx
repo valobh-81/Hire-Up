@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, updateDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,12 +21,9 @@ interface StudentProfile {
     mobileNumber: string;
 }
 
-const COURSES = ["MCA", "MBA", "MA", "MCom", "MSc"];
-
 export default function StudentProfilePage() {
     const { toast } = useToast();
     const [profile, setProfile] = useState<StudentProfile | null>(null);
-    const [detailedDocPath, setDetailedDocPath] = useState<string | null>(null);
     const [fullName, setFullName] = useState('');
     const [mobileNumber, setMobileNumber] = useState('');
     const [loading, setLoading] = useState(true);
@@ -34,22 +31,14 @@ export default function StudentProfilePage() {
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
-            if (user && user.email) {
-                setLoading(true);
-                let profileFound = false;
-                for (const course of COURSES) {
-                    const studentQuery = query(collection(db, `Students-list/Course/${course}`), where("email", "==", user.email), limit(1));
-                    const querySnapshot = await getDocs(studentQuery);
-                    if (!querySnapshot.empty) {
-                        const docSnap = querySnapshot.docs[0];
-                        const data = docSnap.data() as StudentProfile;
-                        setProfile(data);
-                        setFullName(data.fullName);
-                        setMobileNumber(data.mobileNumber || '');
-                        setDetailedDocPath(docSnap.ref.path);
-                        profileFound = true;
-                        break;
-                    }
+            if (user) {
+                const docRef = doc(db, "Students", user.email!);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data() as StudentProfile;
+                    setProfile(data);
+                    setFullName(data.fullName);
+                    setMobileNumber(data.mobileNumber || '');
                 }
                 setLoading(false);
             }
@@ -59,24 +48,15 @@ export default function StudentProfilePage() {
 
     const handleUpdate = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!detailedDocPath) return;
+        if (!profile) return;
         setIsSubmitting(true);
 
-        const detailRef = doc(db, detailedDocPath);
-        
+        const docRef = doc(db, "Students", profile.email);
         try {
-            const updatedData = {
+            await updateDoc(docRef, {
                 fullName: fullName,
                 mobileNumber: mobileNumber,
-            };
-
-            await updateDoc(detailRef, updatedData);
-            
-            // This collection doesn't exist, removing to prevent errors
-            // if(profile?.email){
-            //      await updateDoc(doc(db, 'Students', profile.email), { fullName });
-            // }
-
+            });
             toast({
                 title: "Success!",
                 description: "Your profile has been updated.",

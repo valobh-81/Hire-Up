@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -12,29 +12,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Link as LinkIcon, File as FileIcon, Users, Loader2, CheckCircle2, AlertCircle, Upload } from "lucide-react";
+import { ArrowLeft, Users, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { db, storage } from "@/lib/firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getStudentEmailCount, sendResourceNotification, type EmailStatus } from "@/lib/actions";
+import { collection, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { getStudentEmailCount, sendBulkNotification, type EmailStatus } from "@/lib/actions";
 
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
-  description: z.string().optional(),
-  url: z.string().url("Please enter a valid URL.").optional().or(z.literal('')),
-  type: z.enum(['File', 'Video/Web Link']),
+  description: z.string().min(1, "Description is required"),
+  url: z.string().url("Please enter a valid URL."),
+  type: z.string().min(1, "Type is required, e.g., 'Video' or 'Article'"),
 });
-
 
 export default function NewResourcePage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
-  const [results, setResults] = useState<EmailStatus[]>([]);
   const [studentCount, setStudentCount] = useState(0);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -42,11 +37,9 @@ export default function NewResourcePage() {
       title: "",
       description: "",
       url: "",
-      type: 'File',
+      type: ""
     },
   });
-
-  const resourceType = form.watch("type");
 
   useEffect(() => {
     const fetchCount = async () => {
@@ -58,69 +51,28 @@ export default function NewResourcePage() {
 
 
   const handleSubmit = async (values: z.infer<typeof formSchema>) => {
-    if (values.type === 'File' && !selectedFile) {
-        toast({
-            variant: "destructive",
-            title: "File Required",
-            description: "Please select a file to upload.",
-        });
-        return;
-    }
-    if (values.type === 'Video/Web Link' && !values.url) {
-        toast({
-            variant: "destructive",
-            title: "URL Required",
-            description: "Please enter a valid URL for the resource.",
-        });
-        return;
-    }
-
-    setResults([]);
     startTransition(async () => {
         try {
-            let resourceUrl = values.url || "";
-            
-            // 1. If file, upload to storage
-            if (values.type === 'File' && selectedFile) {
-                const storageRef = ref(storage, `resources/${Date.now()}_${selectedFile.name}`);
-                const uploadResult = await uploadBytes(storageRef, selectedFile);
-                resourceUrl = await getDownloadURL(uploadResult.ref);
-            }
-            
-            // 2. Add the resource to the database
             await addDoc(collection(db, "resources"), {
-                title: values.title,
-                description: values.description,
-                url: resourceUrl,
-                type: values.type,
+                ...values,
                 createdAt: serverTimestamp(),
             });
 
-            // 3. Trigger the bulk email server action to notify students
-            const data = await sendResourceNotification({
-              title: values.title,
-              description: values.description,
-              url: resourceUrl,
-              type: values.type,
-            });
+            // This is a placeholder for the actual email sending logic
+            const emailSubject = `New Resource Added: ${values.title}`;
+            const emailContent = `A new resource has been added: ${values.title}. You can view it here: ${values.url}`;
+            // const data = await sendBulkNotification(emailSubject, emailContent);
+            // setResults(data);
 
-            setResults(data);
-            const successes = data.filter(r => r.status === 'success').length;
-            const failures = data.filter(r => r.status === 'failed').length;
-            
             toast({
-              title: "Dispatch Complete",
-              description: `Resource added. ${successes} emails sent, ${failures} failed.`,
+              title: "Resource Added!",
+              description: "The new resource has been saved.",
             });
-            
-            if (successes > 0 && failures === 0) {
-                 setTimeout(() => router.push("/admin/resources"), 2000);
-            }
+            router.push("/admin/resources");
         } catch (error) {
-             console.error("Error adding resource: ", error);
              toast({
-                title: "Submission Failed",
-                description: "There was an error creating the resource.",
+                title: "Error",
+                description: "Could not add the resource.",
                 variant: "destructive",
             });
         }
@@ -144,7 +96,7 @@ export default function NewResourcePage() {
       <Card>
         <CardHeader>
             <CardTitle>Resource Details</CardTitle>
-            <CardDescription>Adding a resource will trigger an email notification to all registered students.</CardDescription>
+            <CardDescription>This will be available to all students immediately upon creation.</CardDescription>
         </CardHeader>
         <CardContent>
             <Form {...form}>
@@ -155,38 +107,13 @@ export default function NewResourcePage() {
                                 <Users className="w-6 h-6 text-primary"/>
                                 <div>
                                     <p className="font-semibold">
-                                        An alert for this resource will be sent to <strong>{studentCount}</strong> student(s).
+                                        This resource will be visible to <strong>{studentCount}</strong> student(s).
                                     </p>
+                                    <p className="text-sm text-muted-foreground">Email notifications for new resources are not yet active.</p>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
-
-                    <FormField
-                        control={form.control}
-                        name="type"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Resource Type</FormLabel>
-                                <Select onValueChange={(value) => {
-                                    field.onChange(value);
-                                    form.setValue('url', '');
-                                    setSelectedFile(null);
-                                }} defaultValue={field.value}>
-                                    <FormControl>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select resource type" />
-                                        </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                        <SelectItem value="File"><FileIcon className="mr-2 h-4 w-4 inline-block" />File (PDF, Doc, etc.)</SelectItem>
-                                        <SelectItem value="Video/Web Link"><LinkIcon className="mr-2 h-4 w-4 inline-block" />Video/Web Link</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
 
                     <FormField
                         control={form.control}
@@ -214,75 +141,39 @@ export default function NewResourcePage() {
                             </FormItem>
                         )}
                     />
-
-                    {resourceType === "Video/Web Link" && (
-                         <FormField
-                            control={form.control}
-                            name="url"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Resource URL</FormLabel>
-                                    <FormControl>
-                                        <Input type="url" placeholder="https://youtube.com/watch?v=..." {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    )}
-                   
-                   {resourceType === "File" && (
-                        <FormItem>
-                            <FormLabel>Upload File</FormLabel>
-                            <FormControl>
-                                <div className="flex items-center gap-4">
-                                     <label htmlFor="file-upload" className="flex-grow">
-                                        <div className="flex items-center justify-center w-full h-10 px-3 py-2 text-sm border rounded-md cursor-pointer border-input bg-background hover:bg-accent hover:text-accent-foreground">
-                                           <Upload className="w-4 h-4 mr-2"/>
-                                           <span>{selectedFile ? 'Change file' : 'Choose a file'}</span>
-                                        </div>
-                                        <Input 
-                                            id="file-upload" 
-                                            type="file" 
-                                            className="hidden" 
-                                            onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
-                                        />
-                                    </label>
-                                </div>
-                            </FormControl>
-                            {selectedFile && <p className="text-sm text-muted-foreground mt-2">Selected: {selectedFile.name}</p>}
-                            <FormMessage />
-                        </FormItem>
-                   )}
-
+                     <FormField
+                        control={form.control}
+                        name="url"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Resource URL</FormLabel>
+                                <FormControl>
+                                    <Input type="url" placeholder="https://youtube.com/watch?v=..." {...field} />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+                    <FormField
+                        control={form.control}
+                        name="type"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Type</FormLabel>
+                                <FormControl>
+                                    <Input placeholder="e.g., 'Video' or 'PDF'" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
                     <div className="flex justify-end">
-                        <Button type="submit" disabled={isPending || studentCount === 0}>
-                            {isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Adding...</> : 'Add Resource & Notify'}
+                        <Button type="submit" disabled={isPending}>
+                            {isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Adding...</> : 'Add Resource'}
                         </Button>
                     </div>
                 </form>
             </Form>
-
-             {results.length > 0 && (
-                <div className="mt-8 pt-8 border-t animate-in fade-in duration-500">
-                    <h3 className="text-xl font-semibold mb-4">Dispatch Results</h3>
-                    <ul className="space-y-3 max-h-60 overflow-y-auto pr-4">
-                    {results.map((result) => (
-                        <li key={result.email} className="flex items-start p-3 rounded-md bg-muted/50">
-                        {result.status === 'success' ? (
-                            <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 mt-1 flex-shrink-0" />
-                        ) : (
-                            <AlertCircle className="h-5 w-5 text-destructive mr-3 mt-1 flex-shrink-0" />
-                        )}
-                        <div className="flex-grow">
-                            <p className="font-medium">{result.email}</p>
-                            <p className="text-sm text-muted-foreground">{result.message}</p>
-                        </div>
-                        </li>
-                    ))}
-                    </ul>
-                </div>
-            )}
         </CardContent>
       </Card>
     </div>
