@@ -28,7 +28,7 @@ interface Announcement {
 interface Resource {
     id: string;
     title: string;
-    type: 'File' | 'Video';
+    type: 'File' | 'Video/Web Link';
     url: string;
 }
 

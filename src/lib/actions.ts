@@ -93,3 +93,54 @@ export async function sendBulkNotification(subject: string, content: string): Pr
 
   return results;
 }
+
+interface ResourceNotificationInput {
+  title: string;
+  description?: string | null;
+  url: string;
+  type: string;
+}
+
+export async function sendResourceNotification(input: ResourceNotificationInput): Promise<EmailStatus[]> {
+
+  let recipients: string[] = [];
+  try {
+    const querySnapshot = await getDocs(collection(db, "student-emails"));
+    recipients = querySnapshot.docs.map(doc => doc.data().email);
+  } catch (error) {
+    console.error("Error fetching recipients:", error);
+    throw new Error("Could not fetch recipients. Please check your Firestore security rules.");
+  }
+  
+  if(recipients.length === 0) {
+    return [];
+  }
+
+  const uniqueEmails = [...new Set(recipients)];
+  const emailSubject = `New Resource Added: ${input.title}`;
+  const htmlContent = `
+    <p>Hello Student,</p>
+    <p>A new preparation resource has been uploaded and is now available for you.</p>
+    <br/>
+    <p><strong>Title:</strong> ${input.title}</p>
+    <p><strong>Description:</strong> ${input.description || 'No description provided.'}</p>
+    <p><strong>Type:</strong> ${input.type}</p>
+    <br/>
+    <p>You can access it here: <a href="${input.url}">${input.url}</a></p>
+    <br/>
+    <p>Best regards,<br/>The Placement Cell</p>
+  `;
+
+  const results = await Promise.all(
+    uniqueEmails.map(async (email) => {
+      const result = await sendEmail(email, emailSubject, htmlContent);
+      return {
+        email,
+        status: result.success ? "success" : "failed",
+        message: result.message,
+      };
+    })
+  );
+
+  return results;
+}

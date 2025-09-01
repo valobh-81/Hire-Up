@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { MoreHorizontal, PlusCircle, FileText, Video, X, Trash2, Eye, Loader2 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { collection, onSnapshot, doc, deleteDoc, Timestamp } from "firebase/firestore";
+import { collection, onSnapshot, doc, deleteDoc, Timestamp, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
   AlertDialog,
@@ -54,9 +54,9 @@ export default function ResourcesPage() {
   const [resourceToDelete, setResourceToDelete] = useState<Resource | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "resources"), (snapshot) => {
+    const q = query(collection(db, "resources"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
         const resourcesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Resource));
-        resourcesData.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
         setResources(resourcesData);
         setLoading(false);
     });
